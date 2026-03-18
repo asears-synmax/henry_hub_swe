@@ -1062,7 +1062,7 @@ async def health_check() -> dict[str, str]:
 
 
 _SUPPORTED_GH_EVENTS = frozenset(
-    ["issue_comment", "issues", "pull_request_review_comment", "pull_request_review"]
+    ["issue_comment", "issues", "pull_request_review_comment", "pull_request_review", "pull_request"]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 
@@ -1386,6 +1386,50 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     logger.info("LangGraph run created for thread %s from GitHub issue", thread_id)
 
 
+async def process_pr_opened(payload: dict[str, Any]) -> None:
+    """Run the automated review pipeline when an agent-opened PR is created.
+
+    Only fires for PRs on branches prefixed with 'open-swe/' — i.e. branches
+    created by the agent via commit_and_open_pr.  Runs gates + LLM review and
+    queues feedback back to the originating agent thread on failure.
+    """
+    from .reconcile import is_agent_branch, run_review_pipeline
+
+    pr = payload.get("pull_request", {})
+    branch = pr.get("head", {}).get("ref", "")
+
+    if not is_agent_branch(branch):
+        logger.info("PR branch %s is not an agent branch, skipping review pipeline", branch)
+        return
+
+    repo = payload.get("repository", {})
+    repo_owner = repo.get("owner", {}).get("login", "")
+    repo_name = repo.get("name", "")
+    pr_number = pr.get("number")
+    pr_title = pr.get("title", "")
+    pr_body = pr.get("body", "") or ""
+
+    github_token = await get_github_app_installation_token()
+    if not github_token:
+        logger.error("No GitHub token available for review pipeline on PR #%d", pr_number)
+        return
+
+    logger.info(
+        "Starting review pipeline for PR #%d branch %s (%s/%s)",
+        pr_number, branch, repo_owner, repo_name,
+    )
+    await run_review_pipeline(
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        pr_number=pr_number,
+        pr_title=pr_title,
+        pr_body=pr_body,
+        branch=branch,
+        github_token=github_token,
+        langgraph_url=LANGGRAPH_URL,
+    )
+
+
 @app.post("/webhooks/github")
 async def github_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
     """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
@@ -1462,6 +1506,15 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
     if is_issue_comment:
         background_tasks.add_task(process_github_issue, payload, event_type)
         return {"status": "accepted", "message": "Processing GitHub issue comment event"}
+
+    if event_type == "pull_request":
+        action = payload.get("action", "")
+        if action == "opened":
+            logger.info("Accepted pull_request.opened webhook, scheduling review pipeline")
+            background_tasks.add_task(process_pr_opened, payload)
+            return {"status": "accepted", "message": "Processing pull_request.opened event"}
+        logger.info("Ignoring pull_request action: %s", action)
+        return {"status": "ignored", "reason": f"Unsupported pull_request action: {action}"}
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}

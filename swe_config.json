@@ -1,0 +1,14 @@
+{
+  "review": {
+    "enabled": true,
+    "model": "anthropic:claude-sonnet-4-6",
+    "max_retries": 3
+  },
+  "gates": {
+    "enabled": true,
+    "commands": [
+      "ruff check .",
+      "pytest --tb=short -q"
+    ]
+  }
+}
