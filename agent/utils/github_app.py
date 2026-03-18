@@ -35,6 +35,10 @@ async def get_github_app_installation_token() -> str | None:
         Installation access token string, or None if unavailable.
     """
     if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not GITHUB_APP_INSTALLATION_ID:
+        pat = os.environ.get("GITHUB_TOKEN")
+        if pat:
+            logger.debug("GitHub App not configured, falling back to GITHUB_TOKEN PAT")
+            return pat
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None
 
