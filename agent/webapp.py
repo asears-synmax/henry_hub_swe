@@ -35,6 +35,7 @@ from .utils.github_comments import (
     verify_github_signature,
 )
 from .utils.github_token import get_github_token_from_thread
+from .utils.thread_queue import queue_message_for_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -431,51 +432,11 @@ async def _thread_exists(thread_id: str) -> bool:
         return True
 
 
-async def queue_message_for_thread(
+async def _queue_message_for_thread_local(
     thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
 ) -> bool:
-    """Queue a message for a thread that is currently active.
-
-    Stores the message in the langgraph store, namespaced to the thread.
-    Supports multiple queued messages by storing them as a list (FIFO order).
-    The before_model middleware will pick them up and inject them into state.
-
-    Args:
-        thread_id: The LangGraph thread ID
-        message_content: The message content to queue (text or content blocks)
-
-    Returns:
-        True if successfully queued, False otherwise
-    """
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        namespace = ("queue", thread_id)
-        key = "pending_messages"
-
-        new_message = {"content": message_content}
-
-        existing_messages: list[dict[str, Any]] = []
-        try:
-            existing_item = await langgraph_client.store.get_item(namespace, key)
-            if existing_item and existing_item.get("value"):
-                existing_messages = existing_item["value"].get("messages", [])
-        except Exception:  # noqa: BLE001
-            logger.debug("No existing queued messages for thread %s", thread_id)
-
-        existing_messages.append(new_message)
-        value = {"messages": existing_messages}
-
-        logger.info(
-            "Attempting to queue message for thread %s (total queued: %d)",
-            thread_id,
-            len(existing_messages),
-        )
-        await langgraph_client.store.put_item(namespace, key, value)
-        logger.info("Successfully queued message for thread %s", thread_id)
-        return True  # noqa: TRY300
-    except Exception:
-        logger.exception("Failed to queue message for thread %s", thread_id)
-        return False
+    """Wrapper that passes the local LANGGRAPH_URL to queue_message_for_thread."""
+    return await queue_message_for_thread(thread_id, message_content, LANGGRAPH_URL)
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
@@ -673,7 +634,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         )
 
         queued_payload = {"text": prompt, "image_urls": image_urls}
-        queued = await queue_message_for_thread(
+        queued = await _queue_message_for_thread_local(
             thread_id=thread_id,
             message_content=queued_payload,
         )
@@ -1141,7 +1102,7 @@ async def _trigger_or_queue_run(
     thread_active = await is_thread_active(thread_id)
     if thread_active:
         logger.info("Thread %s is busy, queuing GitHub PR comment message", thread_id)
-        await queue_message_for_thread(thread_id, prompt)
+        await _queue_message_for_thread_local(thread_id, prompt)
         return
 
     logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
@@ -1371,7 +1332,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     thread_active = await is_thread_active(thread_id)
     if thread_active:
         logger.info("Thread %s is busy, queuing GitHub issue message", thread_id)
-        await queue_message_for_thread(thread_id, prompt)
+        await _queue_message_for_thread_local(thread_id, prompt)
         return
 
     logger.info("Creating LangGraph run for thread %s from GitHub issue", thread_id)

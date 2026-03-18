@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from langgraph_sdk import get_client
 
 from .gates import run_gates
-from .review import ReviewResult, Verdict, fetch_pr_diff, run_review
+from .review import fetch_pr_diff, run_review
 from .utils.github_comments import post_github_comment
 from .utils.swe_config import load_swe_config
+from .utils.thread_queue import queue_message_for_thread
 
 logger = logging.getLogger(__name__)
 
@@ -129,10 +129,8 @@ async def run_review_pipeline(
 
 async def _queue_feedback(thread_id: str, feedback: str, langgraph_url: str) -> None:
     """Queue feedback back to the agent thread to trigger a fix attempt."""
-    from .webapp import queue_message_for_thread  # avoid circular import at module level
-
     logger.info("Queuing review feedback to thread %s", thread_id)
-    await queue_message_for_thread(thread_id, feedback)
+    await queue_message_for_thread(thread_id, feedback, langgraph_url)
 
 
 async def _get_retry_count(thread_id: str, langgraph_url: str) -> int:

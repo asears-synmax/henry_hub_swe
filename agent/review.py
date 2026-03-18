@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import logging
-from enum import Enum
-from typing import Any
+from enum import StrEnum
 
 import httpx
 from langchain.chat_models import init_chat_model
@@ -33,7 +32,7 @@ If requesting changes, be specific about what needs to be fixed.
 """
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     APPROVED = "APPROVED"
     REQUEST_CHANGES = "REQUEST_CHANGES"
 

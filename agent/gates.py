@@ -103,7 +103,7 @@ async def _run_cmd(command: str, cwd: Path, timeout: int) -> GateResult:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         output = stdout.decode(errors="replace")
         return GateResult(command=command, exit_code=proc.returncode or 0, output=output)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return GateResult(
             command=command,
