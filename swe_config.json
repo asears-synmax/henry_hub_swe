@@ -7,8 +7,9 @@
   "gates": {
     "enabled": true,
     "commands": [
-      "ruff check .",
-      "pytest --tb=short -q"
+      "uv venv .venv 2>/dev/null; . .venv/bin/activate && uv pip install -q '.[dev]'",
+      ". .venv/bin/activate && ruff check --fix . && ruff check .",
+      ". .venv/bin/activate && pytest --tb=short -q -m 'not slow and not integration'"
     ]
   }
 }
